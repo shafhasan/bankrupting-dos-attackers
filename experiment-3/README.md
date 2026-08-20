@@ -1,221 +1,186 @@
-# Trace-driven LINEAR and LINEAR-POWER experiments
+# Resource-Competitive DDoS Client–Server Experiment
 
-This project replays a CIC-DDoS2019-compatible flow CSV on one machine. Dataset source IPs are logical clients. Dataset destination IPs and original IP Protocol values are retained as workload metadata, but all flows share one global pricing server state. The operating-system sockets use `127.0.0.1`, while original IPs, ports, protocol, timestamps, labels, and flow features are preserved during replay and in the final analysis outputs.
+This folder contains the online client–server implementation used to evaluate **LINEAR** and **LINEAR-POWER** on CIC-DDoS2019 flow traces.
 
-The same wrapper command runs both algorithms:
+The experiment replays CIC-DDoS2019 CSV flow records through a local pricing server. All valid labeled flows are included, all source IPs are treated as logical clients, and all flows share one global pricing state. Protocol 17 records are replayed over UDP, protocol 6 records over TCP, and other protocol values are preserved as metadata while their flow messages are carried over the TCP replay socket.
 
-1. **LINEAR** writes directly into the requested `--output-dir`.
-2. **LINEAR-POWER** writes into `<output-dir>/linear_power/`.
+The main wrapper scripts automatically start the pricing server and Weibull estimator, replay the dataset through LINEAR and LINEAR-POWER, evaluate the costs, generate the plots, and shut down the local services. You do **not** need to start the server or estimator manually.
 
+## Requirements
 
-## Workload and client inclusion
+- Python 3.9 or newer
+- `numpy >= 1.26`
+- `pandas >= 2.1`
+- `scipy >= 1.11`
+- `matplotlib >= 3.8`
 
-Client sampling has been removed. For each CSV, every source IP represented by the valid evaluation workload is treated as a logical client. There is no `10`-client cap, no minimum-benign-flow requirement, and no IP-Protocol filter.
+Install the dependencies from `requirements.txt`.
 
-The controller first orders all labeled rows with valid timestamps and uses the earliest `--calibration-good-flows` BENIGN rows (default 200) to initialize the Weibull estimator. Those calibration rows are **not removed** from the measured workload: the evaluation replays every valid labeled flow in the CSV, including the 200 calibration flows. Original protocol 17 is carried over the UDP replay socket and protocol 6 over the TCP replay socket. Other protocol values are also included and retain their original `Protocol` value as metadata, but their JSON replay messages are carried over the TCP data socket because the experiment is flow-level rather than a packet-level protocol emulator. Rows without a usable label or timestamp still cannot be classified or scheduled and are excluded.
+## Setup
 
-The legacy options `--benign-client-count`, `--min-benign-flows-per-client`, and `--seed` are accepted only for backward compatibility and are ignored.
+Clone the repository and enter the project directory:
 
-## Global pricing state
-
-The implementation now follows the paper's single-server pricing model directly. There is exactly one pricing state for the whole run:
-
-- one global iteration ID and iteration start time;
-- one global within-iteration serviced-job counter;
-- one global LINEAR or LINEAR-POWER price;
-- one global pending estimator update applied at the next iteration boundary.
-
-`Destination IP` remains in every message and log row for trace fidelity and offline analysis, but it does not select a separate price counter or iteration. A job to one destination therefore changes the price seen by the next job even when that next job has a different destination IP. The server records `logical_server_key=GLOBAL` for every serviced job and attempt.
-
-## Retry scheduling
-
-LINEAR is the zero-latency baseline: each flow is serviced once at the exact current LINEAR price, with no rejection or retry. LINEAR-POWER uses the nonblocking rejection/retry mechanism. For LINEAR-POWER, the controller uses a deterministic discrete-event scheduler:
-
-1. A new dataset flow arrives at its original CSV timestamp.
-2. A rejected good flow is reinserted at:
-
-```text
-next_retry_time = current_attempt_time + retry_delay
+```bash
+git clone <repository-url>
+cd <repository-directory>
 ```
 
-3. Any new flows whose timestamps occur before that retry are sent first.
-4. New flows win ties when a new arrival and retry have the same logical time.
+Create and activate a virtual environment on macOS/Linux:
 
-This permits other flows, including flows with the same or different destination IPs, to be serviced between two attempts of a rejected good flow. The server lock is held only for the atomic price check and state update of one request; it is not held while a client waits to retry. A good flow begins with fee 1 under either algorithm, updates its fee to the returned required price after a rejection, and retries later. A bad flow uses the informed minimum-fee strategy and submits the current quoted price.
-
-The scheduler is deterministic rather than thread-per-flow. That avoids creating hundreds of thousands of threads and makes repeated runs with the same arguments reproducible.
-
-Configure retry spacing with:
-
-```text
---retry-delay 0.01
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-The value is in original trace seconds and is independent of `--speedup`.
+On Windows PowerShell:
 
-## Fee accounting
-
-The server remains label-blind. It logs both:
-
-- `accepted_fee`: fee attached to the successful attempt;
-- `submitted_fee_sum`: sum of fees attached to every attempt.
-
-The offline evaluator applies the requested label-specific charging rule:
-
-```text
-Good flow cost = accepted_fee only
-Bad flow cost  = submitted_fee_sum
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-Rejected good-flow fees remain represented in the per-flow completion/accounting fields and in the summary field `total_good_rejected_fee_not_charged`, but they do not contribute to algorithm cost A.
+Place the CIC-DDoS2019 CSV file either in the repository directory or provide its full path with `--csv`.
 
-This accepted-only good-flow rule is a custom experimental rule. It differs from the paper's total-fee accounting, where repeated submitted fees are included in client cost.
+## Recommended Run: Fixed Calibration
 
-## Good-flow completion metrics and timeout
+The paper's current Experiment 3 configuration uses the **fixed-calibration** version. The earliest 200 benign flows are used to fit the initial Weibull distribution, and the resulting iteration length remains fixed for the entire run. The 200 calibration flows are still retained in the evaluation workload.
 
-Each algorithm directory contains:
+A complete run can be started with one command:
 
-```text
-good_flow_completion_metrics.csv
+```bash
+python run_fixed_calibration.py --csv "DrDoS_SSDP.csv" --output-dir DrDoS_SSDP --calibration-good-flows 200 --min-estimator-samples 30 --max-evaluation-flows 0 --speedup 0 --plot-every 500 --retry-delay 0.01 --good-flow-timeout 60 --socket-timeout 10 --max-attempts 64
 ```
 
-It records one row for every evaluated good flow, including:
+For another trace, change only the CSV path and output directory. For example:
 
-- logical completion latency in trace seconds;
-- wall-clock completion latency;
-- attempt count;
-- rejection count;
-- final accepted fee;
-- final required server price;
-- deadline;
-- completion status;
-- whether it completed before timeout;
-- whether it timed out.
-
-The logical timeout is configured with:
-
-```text
---good-flow-timeout 60
+```bash
+python run_fixed_calibration.py --csv "TFTP.csv" --output-dir TFTP --calibration-good-flows 200 --min-estimator-samples 30 --max-evaluation-flows 0 --speedup 0 --plot-every 500 --retry-delay 0.01 --good-flow-timeout 60 --socket-timeout 10 --max-attempts 64
 ```
 
-The value is in original trace seconds. Set it to `0` to disable logical flow timeouts. A retry is not sent if its scheduled time would exceed the deadline.
+The wrapper first runs **LINEAR** and then runs **LINEAR-POWER** on the same workload.
 
-The separate option:
+## Main Command-Line Options
 
-```text
---socket-timeout 10
-```
+| Option | Meaning | Default / paper setting |
+|---|---|---:|
+| `--csv` | Path to the CIC-DDoS2019 CSV file | required |
+| `--output-dir` | Directory in which results are written | required |
+| `--calibration-good-flows` | Number of earliest benign flows used for initial Weibull calibration | `200` |
+| `--window-size` | Sliding-window capacity for benign inter-arrival samples | `200` |
+| `--min-estimator-samples` | Minimum number of samples required for fitting | `30` |
+| `--refit-every` | Number of new valid benign intervals between sliding-window refits | `10` |
+| `--max-evaluation-flows` | Maximum number of flows to replay; `0` means all valid flows | `0` |
+| `--speedup` | Wall-clock replay pacing; `0` removes artificial waiting while preserving logical timestamps | `0` |
+| `--plot-every` | Plot one checkpoint every N serviced flows | `500` in the paper runs |
+| `--retry-delay` | Logical trace seconds before a rejected LINEAR-POWER good flow retries | `0.01` |
+| `--good-flow-timeout` | Maximum logical trace time allowed for a good flow; `0` disables the timeout | `60` |
+| `--socket-timeout` | Wall-clock timeout for one local socket operation | `10` |
+| `--max-attempts` | Maximum attempts for a LINEAR-POWER good flow | `64` |
+| `--theorem2-M` | Optional manual value of Theorem 2 parameter `M`; normally computed automatically | automatic |
 
-is a real wall-clock timeout for one local TCP or UDP request. It protects the experiment from a non-responsive process and is not the good-flow completion deadline.
+## What Happens During a Run
 
-## Algorithms
+### Initial calibration
+
+The controller orders all valid labeled flows by timestamp and selects the earliest 200 benign flows for calibration. Their inter-arrival times are fitted to a two-parameter Weibull distribution with location fixed at zero. The estimated mean benign inter-arrival time becomes the pricing iteration length.
 
 ### LINEAR
 
-With `s` jobs already serviced globally in the current iteration:
+With `s` jobs already serviced in the current iteration, LINEAR uses
 
 ```text
 PRICE = s + 1
 ```
 
-LINEAR follows the paper's zero-latency model in this experiment. The current LINEAR price is treated as known at submission time, so the server charges exactly that price and services the flow in one attempt. LINEAR does not use the retry delay, bounce logic, or maximum-attempt rule.
+LINEAR is evaluated as the zero-latency baseline. Each flow is serviced once at the exact current price, so LINEAR has no stale-price rejection or retry process.
 
 ### LINEAR-POWER
+
+LINEAR-POWER uses
 
 ```text
 PRICE = 2^floor(log2(s + 1))
 ```
 
-For LINEAR-POWER, a good job starts with fee 1. When rejected, it stores the returned price and retries at the scheduled retry time. Because other jobs can be serviced in between, the returned price may be stale by the next attempt, and one good job can be rejected multiple times. LINEAR does not use this asynchronous retry path.
+A good flow begins with fee 1. If the fee is below the server's current price, the request is rejected, the current price is returned, and the flow retries after `--retry-delay`. Other original flows may be processed before the retry, so the returned price can become stale again. New original arrivals are processed before retries when both occur at the same logical timestamp.
 
-The existing adversary model remains unchanged: a bad job obtains an exact current quote and submits that price once.
+Bad LINEAR-POWER flows use an informed minimum-fee strategy: the controller obtains the current server price and submits that exact amount.
 
-## Estimator and iteration behavior
+## Cost Calculation
 
-- Initial benign calibration fits a zero-location Weibull distribution.
-- The estimated mean benign inter-arrival time becomes the iteration length.
-- Fixed mode freezes that estimate.
-- Sliding mode refits after `--refit-every` new valid benign intervals.
-- All destination IPs and all original protocol values share one global pricing state and one iteration clock.
-- Mathematical iteration boundaries are preserved, including empty iterations.
-- Retry attempts use their scheduled logical arrival time, so a retry may cross into a later iteration.
-- Sliding estimator observations occur once per original dataset flow, not once per retry. The calibration benign rows are not observed a second time by the sliding estimator when they are replayed for pricing.
-
-## Example fixed run
-
-```bash
-python run_fixed_calibration.py \
-  --csv "DrDoS_DNS.csv" \
-  --output-dir runs/fixed \
-  --calibration-good-flows 200 \
-  --window-size 200 \
-  --min-estimator-samples 30 \
-  --refit-every 10 \
-  --max-evaluation-flows 0 \
-  --speedup 0 \
-  --plot-every 500 \
-  --retry-delay 0.01 \
-  --good-flow-timeout 60 \
-  --socket-timeout 10
-```
-
-## Example sliding run
-
-```bash
-python run_sliding_window.py \
-  --csv "DrDoS_DNS.csv" \
-  --output-dir runs/sliding \
-  --calibration-good-flows 200 \
-  --window-size 200 \
-  --min-estimator-samples 30 \
-  --refit-every 10 \
-  --max-evaluation-flows 0 \
-  --speedup 0 \
-  --plot-every 500 \
-  --retry-delay 0.01 \
-  --good-flow-timeout 60
-```
-
-## Important outputs
-
-After a successful LINEAR or LINEAR-POWER run, only the paper-facing outputs are retained in that algorithm's run directory:
-
-- `evaluation_summary.json`: aggregate A, B, B/A, evaluation/serviced protocol counts, serviced-flow, latency, completion, fee, and rejection statistics;
-- `good_flow_completion_metrics.csv`: one row per evaluated good flow with completion latency, attempts, rejections, final accepted fee, and timeout status;
-- `priced_flows_with_ground_truth.csv`: serviced flows joined with offline labels and cumulative Algorithm/Adversary cost accounting;
-- `theorem_proxy_metadata.json`: theorem-proxy metadata, scaling constant, and for LINEAR-POWER the computed M and retry-delay Delta proxy;
-- `B_over_A_linear_scale.png`: empirical B/A versus the scaled theorem proxy on a linear y-axis;
-- `B_over_A_log_scale.png`: the same comparison on a logarithmic y-axis.
-
-Intermediate files needed during replay, evaluation, and plotting are deleted only after the run finishes successfully. On a failed run, they are retained for debugging. Per-client/per-destination summary CSVs, attempt-level CSVs, calibration JSON/CSV files, estimator-update CSVs, plot-data CSVs, and `algorithm_comparison_summary.json` are no longer written as persistent outputs.
-
-## Install
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Automatic Theorem 2 M calculation
-
-For LINEAR-POWER plots, `M` is now computed automatically unless `--theorem2-M` is supplied manually.
-The implementation uses the configured logical `--retry-delay` as an experimental proxy for the
-Theorem 2 delay interval `Delta`, then computes
+For every serviced flow, the server incurs one unit of service cost. The offline evaluator computes
 
 ```text
-M = maximum number of original BENIGN flow arrivals in any interval of length retry_delay
+A = total service cost + accepted fees of good flows
+B = total submitted fees of bad flows
+B/A = adversary-to-algorithm cost ratio
 ```
 
-Only original generated good flows from `evaluation_ground_truth.csv` are counted; retry attempts are
-not counted. The selected value, its source, the delay proxy, and the final plot scaling constant are
-written to `theorem_proxy_metadata.json` in each run directory.
+For LINEAR-POWER, rejected good-flow fees are recorded but are not charged in `A`; only the final accepted good-flow fee contributes to the good-client component of Algorithm cost. This is an experiment-specific accounting rule.
 
-A manual override remains available:
+Dataset labels are used for estimator calibration and offline evaluation, but the pricing server itself is label-blind when it assigns prices.
+
+## Output Files
+
+If the requested output directory is
+
+```text
+TFTP
+```
+
+then LINEAR and LINEAR-POWER results are respectively stored in
+
+```text
+TFTP/linear/
+TFTP/linear_power/
+```
+
+After a successful run, each algorithm keeps the following outputs:
+
+```text
+evaluation_summary.json
+good_flow_completion_metrics.csv
+priced_flows_with_ground_truth.csv
+theorem_proxy_metadata.json
+B_over_A_linear_scale.png
+B_over_A_log_scale.png
+```
+
+`evaluation_summary.json` contains the final Algorithm cost `A`, Adversary cost `B`, `B/A`, flow counts, protocol counts, and good-flow completion/rejection statistics.
+
+`good_flow_completion_metrics.csv` contains one row for each evaluated benign flow, including its attempt count, rejection count, accepted fee, completion latency, and timeout status.
+
+`priced_flows_with_ground_truth.csv` contains the serviced flows joined with the offline labels and cumulative Algorithm/Adversary cost accounting.
+
+The two PNG files compare the empirical `B/A` curve against the corresponding scaled theoretical trend on linear and logarithmic y-axes.
+
+Temporary server, controller, estimator, and evaluation files are removed after a successful run. If a run fails, those intermediate files are intentionally retained for debugging.
+
+## Theoretical Plot Parameters
+
+LINEAR is plotted against the scaled Theorem 1 trend. LINEAR-POWER is plotted against a scaled Theorem 2 proxy.
+
+For LINEAR-POWER, `M` is computed automatically as the maximum number of original benign-flow arrivals occurring within any interval of length `--retry-delay`. Retry attempts are not counted as newly generated good jobs. The configured retry delay is used as an experimental proxy for the theoretical communication-delay parameter `Delta`.
+
+To manually override `M`, add, for example:
 
 ```bash
 --theorem2-M 5
 ```
 
-When the option is omitted, the normal experiment command automatically calculates `M` for the
-LINEAR-POWER run. LINEAR continues to use the Theorem 1 plotting branch and does not use `M`.
+## Repository Files
+
+```text
+common.py                  Shared socket/CSV utilities
+estimator_service.py       Weibull estimator service
+evaluate.py                Offline A, B, and B/A calculation
+plot_b_over_a.py           Empirical/theoretical B/A plots
+run_experiment.py          Runs LINEAR and LINEAR-POWER sequentially
+run_fixed_calibration.py   Fixed-estimator wrapper
+run_sliding_window.py      Sliding-window wrapper
+server.py                  Global pricing server
+trace_controller.py        Calibration and trace replay controller
+requirements.txt           Python dependencies
+```
