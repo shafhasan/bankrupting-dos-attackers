@@ -118,7 +118,7 @@ python poisson_linear_experiment.py --total-flows 1000000 --good-fraction 0.20 -
 For a total of $N$ flows and benign fraction $f_g$, the code calculates:
 
 $$
-N_g = \operatorname{round}(Nf_g)
+N_g = \mathrm{round}(Nf_g)
 $$
 
 and
@@ -136,7 +136,7 @@ estimator and experiment.
 Benign inter-arrival times are independent exponential random variables:
 
 $$
-X_i \sim \operatorname{Exponential}(\lambda_g).
+X_i \sim \mathrm{Exponential}(\lambda_g).
 $$
 
 Their expected value is:
@@ -237,8 +237,7 @@ good/bad label is not used when assigning the price.
 The cumulative algorithm cost is:
 
 $$
-A = N_{\mathrm{serviced}}
-+ \sum_{j\in\mathcal{G}}p_j,
+A = N_{\mathrm{serviced}} + \sum_{j\in\mathcal{G}}p_j
 $$
 
 where the first term is one normalized service-cost unit for every serviced
@@ -247,7 +246,7 @@ flow and $\mathcal{G}$ is the set of benign flows.
 The cumulative adversary cost is:
 
 $$
-B = \sum_{j\in\mathcal{B}}p_j,
+B = \sum_{j\in\mathcal{B}}p_j
 $$
 
 where $\mathcal{B}$ is the set of malicious flows.
@@ -264,7 +263,7 @@ At each checkpoint, the script evaluates the unscaled proxy:
 
 $$
 R_{\mathrm{theory}} =
-\frac{B}{\sqrt{B(g+1)}+(g+1)},
+\frac{B}{\sqrt{B(g+1)}+(g+1)}
 $$
 
 where $g$ is the cumulative number of benign flows.
