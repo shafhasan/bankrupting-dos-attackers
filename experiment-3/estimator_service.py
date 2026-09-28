@@ -14,10 +14,13 @@ from scipy.stats import weibull_min
 from common import BENIGN_LABEL, json_dumps_line
 
 
+SLIDING_WINDOW_SIZE = 50
+
+
 @dataclass
 class EstimatorState:
     mode: str = "fixed"
-    window_size: int = 200
+    window_size: int = SLIDING_WINDOW_SIZE
     min_samples: int = 30
     refit_every: int = 10
     min_length: float = 1e-6
@@ -38,7 +41,7 @@ class EstimatorState:
             self.mode = str(message.get("mode", "fixed"))
             if self.mode not in {"fixed", "sliding"}:
                 raise ValueError("mode must be 'fixed' or 'sliding'")
-            self.window_size = int(message.get("window_size", 200))
+            self.window_size = SLIDING_WINDOW_SIZE
             self.min_samples = int(message.get("min_samples", 30))
             self.refit_every = int(message.get("refit_every", 10))
             self.min_length = float(message.get("min_length", 1e-6))
@@ -109,12 +112,10 @@ class EstimatorState:
             if self.frozen_estimate is None:
                 raise ValueError("freeze must be called before start_evaluation")
             self.phase = "evaluation"
-            # The calibration rows are also replayed in the measured workload,
-            # but trace_controller deliberately does not feed those same benign
-            # rows to the estimator twice.  Keep the calibration IATs as the
-            # initial sliding window and retain the timestamp of the final
-            # calibration good flow.  This lets the first benign flow *after*
-            # calibration form the correct next IAT.
+            # Calibration good rows are removed from the measured workload.
+            # For sliding mode, keep the calibration IATs as the initial window
+            # and retain the timestamp of the final calibration good flow so the
+            # first post-calibration benign flow forms the correct next IAT.
             if self.mode == "sliding":
                 self.good_iats = deque(self.calibration_iats[-self.window_size :], maxlen=self.window_size)
             else:

@@ -10,6 +10,10 @@ from typing import Any
 from common import request_json, wait_for_port
 
 
+CALIBRATION_GOOD_FLOWS = 50
+SLIDING_WINDOW_SIZE = 50
+
+
 def run_one_algorithm(
     *,
     base: Path,
@@ -36,8 +40,6 @@ def run_one_algorithm(
             str(args.control_port),
             "--algorithm",
             algorithm,
-            "--output",
-            str(output_dir / "server_jobs.csv"),
         ],
         stdout=server_log,
         stderr=subprocess.STDOUT,
@@ -83,9 +85,9 @@ def run_one_algorithm(
             "--estimator-port",
             str(args.estimator_port),
             "--calibration-good-flows",
-            str(args.calibration_good_flows),
+            str(CALIBRATION_GOOD_FLOWS),
             "--window-size",
-            str(args.window_size),
+            str(SLIDING_WINDOW_SIZE),
             "--min-estimator-samples",
             str(args.min_estimator_samples),
             "--refit-every",
@@ -102,15 +104,18 @@ def run_one_algorithm(
             str(args.good_flow_timeout),
             "--socket-timeout",
             str(args.socket_timeout),
+            "--csv-chunk-size",
+            str(args.csv_chunk_size),
         ]
+        if args.temp_dir is not None:
+            command.extend(["--temp-dir", str(args.temp_dir)])
+        if args.theorem2_M is not None:
+            command.extend(["--theorem2-M", str(args.theorem2_M)])
         subprocess.run(command, check=True)
-        flushed = request_json(args.host, args.control_port, {"command": "flush"}, timeout=10)
-        if not flushed.get("ok"):
-            raise RuntimeError(flushed)
-        subprocess.run(
-            [sys.executable, str(base / "evaluate.py"), "--run-dir", str(output_dir)],
-            check=True,
-        )
+
+        # trace_controller.py now performs aggregate cost accounting and Pearson
+        # calculation online. No server_jobs/evaluation_ground_truth/replay CSVs
+        # are written and evaluate.py is no longer part of the normal pipeline.
         plot_command = [
             sys.executable,
             str(base / "plot_b_over_a.py"),
@@ -119,8 +124,6 @@ def run_one_algorithm(
             "--plot-every",
             str(args.plot_every),
         ]
-        if args.theorem2_M is not None:
-            plot_command.extend(["--theorem2-M", str(args.theorem2_M)])
         subprocess.run(plot_command, check=True)
         summary = json.loads((output_dir / "evaluation_summary.json").read_text(encoding="utf-8"))
         run_succeeded = True
@@ -143,19 +146,11 @@ def run_one_algorithm(
         server_log.close()
         estimator_log.close()
 
-        # Keep only the paper-facing outputs after a successful run.  These
-        # intermediate files are required while replay/evaluation/plotting are
-        # in progress, so they are removed only after all stages succeed.
+        # The large per-flow intermediate CSVs are never created. After a
+        # successful run, only subprocess stdout logs are disposable. The small
+        # selection summary and 500-flow plotting checkpoints are retained.
         if run_succeeded:
-            intermediate_files = [
-                "selection_summary.json",
-                "evaluation_ground_truth.csv",
-                "server_jobs.csv",
-                "controller_replay_log.csv",
-                "server_stdout.log",
-                "estimator_stdout.log",
-            ]
-            for filename in intermediate_files:
+            for filename in ["server_stdout.log", "estimator_stdout.log"]:
                 path = output_dir / filename
                 if path.exists():
                     path.unlink()
@@ -188,13 +183,13 @@ def main() -> None:
         default=None,
         help="Deprecated and ignored; client sampling is no longer performed",
     )
-    parser.add_argument("--calibration-good-flows", type=int, default=200)
-    parser.add_argument("--window-size", type=int, default=200)
+    parser.add_argument("--calibration-good-flows", type=int, default=50, help="Deprecated and ignored; calibration always uses the first 50 good flows")
+    parser.add_argument("--window-size", type=int, default=50, help="Deprecated and ignored; sliding-window size is fixed at 50")
     parser.add_argument("--min-estimator-samples", type=int, default=30)
     parser.add_argument("--refit-every", type=int, default=10)
     parser.add_argument("--speedup", type=float, default=0.0)
     parser.add_argument("--max-evaluation-flows", type=int, default=0)
-    parser.add_argument("--plot-every", type=int, default=1)
+    parser.add_argument("--plot-every", type=int, default=500, help="Deprecated and ignored; plots always use every 500 flows")
     parser.add_argument(
         "--max-attempts",
         "--max-linear-power-attempts",
@@ -226,6 +221,17 @@ def main() -> None:
         help="Real wall-clock timeout for one local socket request",
     )
     parser.add_argument(
+        "--csv-chunk-size",
+        type=int,
+        default=100_000,
+        help="CSV rows processed at a time by the streaming controller",
+    )
+    parser.add_argument(
+        "--temp-dir",
+        default=None,
+        help="Optional directory for temporary external-sort files when input is not already ordered",
+    )
+    parser.add_argument(
         "--theorem2-M",
         type=float,
         default=None,
@@ -241,6 +247,8 @@ def main() -> None:
     parser.add_argument("--control-port", type=int, default=19005)
     parser.add_argument("--estimator-port", type=int, default=19100)
     args = parser.parse_args()
+    if args.csv_chunk_size <= 0:
+        raise ValueError("--csv-chunk-size must be positive")
 
     base = Path(__file__).resolve().parent
     output_dir = Path(args.output_dir).resolve()

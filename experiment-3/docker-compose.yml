@@ -1,0 +1,54 @@
+services:
+  fixed:
+    build: .
+    image: ddos-exp3:latest
+    init: true
+    volumes:
+      - ./data:/data:ro
+      - ./results:/results
+    command:
+      - python
+      - run_fixed_calibration.py
+      - --csv
+      - /data/${DATASET:-trace.csv}
+      - --output-dir
+      - /results/${RUN_NAME:-fixed_run}
+      - --speedup
+      - "0"
+      - --retry-delay
+      - "0.01"
+      - --good-flow-timeout
+      - "60"
+      - --socket-timeout
+      - "10"
+      - --max-attempts
+      - "64"
+      - --csv-chunk-size
+      - "${CSV_CHUNK_SIZE:-100000}"
+
+  sliding:
+    build: .
+    image: ddos-exp3:latest
+    init: true
+    volumes:
+      - ./data:/data:ro
+      - ./results:/results
+    command:
+      - python
+      - run_sliding_window.py
+      - --csv
+      - /data/${DATASET:-trace.csv}
+      - --output-dir
+      - /results/${RUN_NAME:-sliding_run}
+      - --speedup
+      - "0"
+      - --retry-delay
+      - "0.01"
+      - --good-flow-timeout
+      - "60"
+      - --socket-timeout
+      - "10"
+      - --max-attempts
+      - "64"
+      - --csv-chunk-size
+      - "${CSV_CHUNK_SIZE:-100000}"

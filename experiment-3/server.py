@@ -30,7 +30,7 @@ class LinearEngine:
     scheduler lives in trace_controller.py.
     """
 
-    def __init__(self, output_csv: Path, algorithm: str, attempt_output_csv: Path | None = None):
+    def __init__(self, output_csv: Path | None, algorithm: str, attempt_output_csv: Path | None = None):
         if algorithm not in {"linear", "linear-power"}:
             raise ValueError("algorithm must be 'linear' or 'linear-power'")
         self.algorithm = algorithm
@@ -41,44 +41,51 @@ class LinearEngine:
         self.state: PricingState | None = None
         self.pending_attempts: dict[str, dict[str, float | int]] = {}
 
-        self.logger = CsvAppender(
-            output_csv,
-            [
-                "sequence_id",
-                "flow_uid",
-                "generated_trace_time",
-                "trace_time",
-                "timestamp",
-                "source_ip",
-                "source_port",
-                "destination_ip",
-                "destination_port",
-                "protocol",
-                "transport",
-                "algorithm",
-                "logical_server_key",
-                "iteration_id",
-                "iteration_start",
-                "iteration_length",
-                "estimator_version",
-                "estimator_source",
-                "serviced_before",
-                "price",
-                "attached_fee",
-                "accepted_fee",
-                "submitted_fee_sum",
-                "total_fee_paid",
-                "attempt_count",
-                "rejection_count",
-                "bounced_attempts",
-                "overpayment",
-                "service_cost",
-                "total_fwd_packets",
-                "total_backward_packets",
-                "total_fwd_bytes",
-                "total_backward_bytes",
-                "flow_duration",
-            ],
+        # Per-flow server logging is optional. The normal experiment path leaves
+        # it disabled and performs accounting online in trace_controller.py.
+        # --output remains available only for debugging/backward compatibility.
+        self.logger = (
+            CsvAppender(
+                output_csv,
+                [
+                    "sequence_id",
+                    "flow_uid",
+                    "generated_trace_time",
+                    "trace_time",
+                    "timestamp",
+                    "source_ip",
+                    "source_port",
+                    "destination_ip",
+                    "destination_port",
+                    "protocol",
+                    "transport",
+                    "algorithm",
+                    "logical_server_key",
+                    "iteration_id",
+                    "iteration_start",
+                    "iteration_length",
+                    "estimator_version",
+                    "estimator_source",
+                    "serviced_before",
+                    "price",
+                    "attached_fee",
+                    "accepted_fee",
+                    "submitted_fee_sum",
+                    "total_fee_paid",
+                    "attempt_count",
+                    "rejection_count",
+                    "bounced_attempts",
+                    "overpayment",
+                    "service_cost",
+                    "total_fwd_packets",
+                    "total_backward_packets",
+                    "total_fwd_bytes",
+                    "total_backward_bytes",
+                    "flow_duration",
+                ],
+            )
+            if output_csv is not None
+            else None
         )
         self.attempt_logger = (
             CsvAppender(
@@ -316,7 +323,8 @@ class LinearEngine:
                 "overpayment": overpayment,
                 "service_cost": 1,
             }
-            self.logger.write(row)
+            if self.logger is not None:
+                self.logger.write(row)
             self.pending_attempts.pop(flow_uid, None)
             return {
                 "ok": True,
@@ -340,13 +348,15 @@ class LinearEngine:
 
     def flush(self) -> None:
         with self.lock:
-            self.logger.flush()
+            if self.logger is not None:
+                self.logger.flush()
             if self.attempt_logger is not None:
                 self.attempt_logger.flush()
 
     def close(self) -> None:
         with self.lock:
-            self.logger.close()
+            if self.logger is not None:
+                self.logger.close()
             if self.attempt_logger is not None:
                 self.attempt_logger.close()
 
@@ -463,12 +473,15 @@ def main() -> None:
     parser.add_argument("--tcp-port", type=int, default=19006)
     parser.add_argument("--control-port", type=int, default=19005)
     parser.add_argument("--algorithm", choices=["linear", "linear-power"], default="linear")
-    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--output",
+        help="Optional debug CSV for serviced jobs; omitted in the normal low-I/O experiment path",
+    )
     parser.add_argument("--attempt-output")
     args = parser.parse_args()
 
     ENGINE = LinearEngine(
-        Path(args.output),
+        Path(args.output) if args.output else None,
         args.algorithm,
         Path(args.attempt_output) if args.attempt_output else None,
     )

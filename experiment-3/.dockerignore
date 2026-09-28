@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.csv
+*.zip
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+results/
+outputs/
