@@ -2,15 +2,15 @@
 
 This directory contains the Dockerized implementation used for **Experiment 3** of the resource-competitive DDoS evaluation. The experiment replays CIC-DDoS2019 flow records through a localhost client–server system and evaluates both **LINEAR** and **LINEAR-POWER** under either a fixed or sliding-window good-traffic estimator.
 
-The Docker image contains the experiment code and Python dependencies. CIC-DDoS2019 CSV files are **not** copied into the image; they are mounted read-only at runtime. Results are written to a separate mounted directory.
+The Docker image contains the experiment code and Python dependencies. CIC-DDoS2019 CSV files are **not** copied into the image; they are mounted read-only at runtime. Results are written to a separate directory.
 
 ## Experiment overview
 
 For each CIC-DDoS2019 trace, the implementation:
 
 1. orders the trace chronologically;
-2. uses the earliest **50 benign flows** to initialize a two-parameter Weibull estimator;
-3. treats the entire chronological prefix through and including the 50th benign flow as calibration traffic and excludes that prefix from the measured workload;
+2. uses the earliest **50 good flows** to initialize a two-parameter Weibull estimator;
+3. treats the entire chronological prefix through and including the 50th good flow as calibration traffic and excludes that prefix from the measured workload;
 4. resets the pricing/iteration state before evaluation;
 5. replays the remaining flows through both LINEAR and LINEAR-POWER; and
 6. computes the empirical adversary-to-algorithm cost ratio and the corresponding raw theoretical trend.
@@ -18,9 +18,9 @@ For each CIC-DDoS2019 trace, the implementation:
 Two estimator configurations are supported:
 
 - **Fixed estimator:** the Weibull estimate obtained during calibration is used for the remainder of the trace.
-- **Sliding-window estimator:** the estimator begins from the calibration samples, maintains the most recent **50 positive benign inter-arrival times**, and refits after every **10 new valid positive benign inter-arrival samples**. A newly estimated iteration length is adopted at an iteration boundary.
+- **Sliding-window estimator:** the estimator begins from the calibration samples, maintains the most recent **50 good inter-arrival times**, and refits after every **10 new good inter-arrival samples**. A newly estimated iteration length is adopted at an iteration boundary.
 
-Dataset labels are used by the estimator and experimental controller to identify benign observations, instantiate the prescribed good-client/adversarial behavior, and compute costs. **Labels are not provided to the pricing server and do not directly determine the server price.**
+Dataset labels are used by the estimator and experimental controller to identify good flows, instantiate the prescribed good-client/adversarial behavior, and compute costs. **Labels are not provided to the pricing server and do not directly determine the server price.**
 
 ## Requirements
 
@@ -82,6 +82,9 @@ A convenient local layout is:
 experiment-3/
 ├── data/
 │   └── DrDoS_MSSQL.csv
+│   └── DrDoS_DNS.csv
+│   └── DrDoS_SSDP.csv
+│   └── ...
 ├── results/
 ├── Dockerfile
 ├── docker-compose.yml
@@ -101,42 +104,14 @@ Place the CIC-DDoS2019 CSV file in `data/`.
 ### Fixed estimator
 
 ```bash
-docker run --rm --init \
-  --name exp3-mssql-fixed \
-  -v "$PWD/data:/data:ro" \
-  -v "$PWD/results:/results" \
-  ddos-exp3:latest \
-  python run_fixed_calibration.py \
-    --csv /data/DrDoS_MSSQL.csv \
-    --output-dir /results/DrDoS_MSSQL_fixed \
-    --speedup 0 \
-    --retry-delay 0.01 \
-    --good-flow-timeout 60 \
-    --socket-timeout 10 \
-    --max-attempts 64
+docker run --rm --init --name exp3-mssql-fixed -v "$PWD/data:/data:ro" -v "$PWD/results:/results" ddos-exp3:latest python run_fixed_calibration.py --csv /data/DrDoS_MSSQL.csv --output-dir /results/DrDoS_MSSQL_fixed --speedup 0 --retry-delay 0.01 --good-flow-timeout 60 --socket-timeout 10 --max-attempts 64
 ```
 
 ### Sliding-window estimator
 
 ```bash
-docker run --rm --init \
-  --name exp3-mssql-sliding \
-  -v "$PWD/data:/data:ro" \
-  -v "$PWD/results:/results" \
-  ddos-exp3:latest \
-  python run_sliding_window.py \
-    --csv /data/DrDoS_MSSQL.csv \
-    --output-dir /results/DrDoS_MSSQL_sliding \
-    --speedup 0 \
-    --retry-delay 0.01 \
-    --good-flow-timeout 60 \
-    --socket-timeout 10 \
-    --max-attempts 64
+docker run --rm --init --name exp3-mssql-sliding -v "$PWD/data:/data:ro" -v "$PWD/results:/results" ddos-exp3:latest python run_sliding_window.py --csv /data/DrDoS_MSSQL.csv --output-dir /results/DrDoS_MSSQL_sliding --speedup 0 --retry-delay 0.01 --good-flow-timeout 60 --socket-timeout 10 --max-attempts 64
 ```
-
-No host ports need to be published. The runner starts the server and estimator as subprocesses inside the same container and communicates over container-localhost sockets.
-
-`--init` is recommended because the experiment runner manages child processes.
 
 ## Run with Docker Compose
 
@@ -189,9 +164,9 @@ The paper configuration uses:
 
 | Parameter | Default / paper value | Meaning |
 |---|---:|---|
-| Calibration good flows | 50 | Earliest benign flows used for the initial Weibull fit |
-| Sliding-window size | 50 | Most recent positive benign IAT samples retained |
-| Refit interval | 10 | New valid positive benign IAT samples required before a sliding refit |
+| Calibration good flows | 50 | Earliest good flows used for the initial Weibull fit |
+| Sliding-window size | 50 | Most recent good IAT samples retained |
+| Refit interval | 10 | New good IAT samples required before a sliding refit |
 | `--retry-delay` | 0.01 s | Logical trace-time delay before a rejected LINEAR-POWER good flow retries |
 | `--good-flow-timeout` | 60 s | Maximum logical trace time allowed for a good flow |
 | `--max-attempts` | 64 | Maximum attempts for a LINEAR-POWER good flow |
@@ -199,8 +174,6 @@ The paper configuration uses:
 | `--speedup` | 0 | Removes wall-clock pacing while preserving logical trace timing/order |
 | CSV chunk size | 100000 | Rows processed per input chunk |
 | Plot checkpoint | 500 flows | Frequency of stored points used for plotting |
-
-The calibration count and sliding-window size are fixed at 50 in the current experiment configuration. Deprecated command-line options retained for backward compatibility do not change these values.
 
 ## LINEAR behavior
 
@@ -234,9 +207,7 @@ For LINEAR-POWER, the configured logical retry delay is used as the experimental
 Delta = retry-delay = 0.01 s
 ```
 
-By default, the implementation computes `M` automatically from the post-calibration original benign arrivals as the maximum number of newly generated good flows in any interval of length `Delta`. Retries are excluded because they are not newly generated jobs.
-
-A manual value can be supplied with `--theorem2-M`, but the paper experiments use the automatically derived trace-specific value.
+By default, the implementation computes `M` automatically from the post-calibration original good arrivals as the maximum number of newly generated good flows in any interval of length `Delta`. Retries are excluded because they are not newly generated jobs.
 
 ## Cost accounting and theoretical comparison
 
@@ -253,37 +224,7 @@ The empirical curve is the cumulative adversary-to-algorithm ratio:
 B / A
 ```
 
-The theoretical LINEAR and LINEAR-POWER curves are evaluated directly from the corresponding theorem-based expressions. The current implementation uses:
-
-- **no final-point scaling**;
-- **no normalization**; and
-- **no RMSE calculation**.
-
-Pearson correlation is calculated using **all valid evaluation-flow points** from the raw empirical and theoretical sequences. To keep output size manageable, only every 500th flow point, plus the final point, is retained for plotting.
-
-Both linear-scale and logarithmic-scale plots are generated.
-
-## Low-memory / low-I/O processing
-
-The current implementation is designed for large CIC-DDoS2019 CSV files.
-
-It reads only the columns needed by the experiment and processes the input in bounded chunks rather than loading the complete CSV into a single DataFrame. The default is:
-
-```text
---csv-chunk-size 100000
-```
-
-If memory is constrained, reduce the chunk size, for example:
-
-```bash
---csv-chunk-size 50000
-```
-
-Changing the chunk size changes only I/O and memory usage; it does not change the logical experiment.
-
-The trace is processed in `(parsed timestamp, flow UID)` order. If the input file is already ordered, it is streamed directly. If it is not ordered, the controller performs a bounded-memory external merge sort using temporary files and deletes those temporary files after the run.
-
-The low-I/O implementation avoids large per-flow intermediate CSVs such as `server_jobs.csv`, `evaluation_ground_truth.csv`, `controller_replay_log.csv`, and `priced_flows_with_ground_truth.csv` in the final results path.
+Pearson correlation is calculated using **all valid evaluation-flow points** from the raw empirical and theoretical sequences.
 
 ## Output structure
 
@@ -309,15 +250,6 @@ results/DrDoS_MSSQL_fixed/
     └── B_over_A_log_scale.png
 ```
 
-The most useful files are:
-
-- `evaluation_summary.json` — final `A`, `B`, `B/A`, Pearson correlation, and run-level statistics.
-- `theorem_proxy_metadata.json` — theoretical-curve metadata, Pearson basis, and LINEAR-POWER `M`/delay-proxy information.
-- `selection_summary.json` — calibration cutoff, evaluation counts, estimator initialization, ordering/input information, and experiment settings.
-- `good_flow_completion_metrics.csv` — per-good-flow attempts, rejections, accepted fee, logical completion latency, and timeout status.
-- `B_over_A_plot_points.csv` — compact every-500-flow series used to generate the figures.
-- `B_over_A_linear_scale.png` and `B_over_A_log_scale.png` — empirical/theoretical comparison plots.
-
 ## Running multiple datasets
 
 On macOS/Linux, the following example runs the fixed estimator for every CSV in `data/`:
@@ -326,18 +258,7 @@ On macOS/Linux, the following example runs the fixed estimator for every CSV in 
 for file in data/*.csv; do
   name="$(basename "$file" .csv)"
 
-  docker run --rm --init \
-    -v "$PWD/data:/data:ro" \
-    -v "$PWD/results:/results" \
-    ddos-exp3:latest \
-    python run_fixed_calibration.py \
-      --csv "/data/$(basename "$file")" \
-      --output-dir "/results/${name}_fixed" \
-      --speedup 0 \
-      --retry-delay 0.01 \
-      --good-flow-timeout 60 \
-      --socket-timeout 10 \
-      --max-attempts 64
+  docker run --rm --init -v "$PWD/data:/data:ro" -v "$PWD/results:/results" ddos-exp3:latest python run_fixed_calibration.py --csv "/data/$(basename "$file")" --output-dir "/results/${name}_fixed" --speedup 0 --retry-delay 0.01 --good-flow-timeout 60 --socket-timeout 10 --max-attempts 64
 done
 ```
 
@@ -352,14 +273,6 @@ Replace `run_fixed_calibration.py` and `_fixed` with `run_sliding_window.py` and
 - One global pricing state is shared across all clients, destination IPs, ports, and protocols.
 
 ## Troubleshooting
-
-### Container exits with code 137 / `SIGKILL`
-
-This usually indicates that Docker ran out of memory. Increase the memory available to Docker Desktop or reduce the CSV chunk size:
-
-```bash
---csv-chunk-size 50000
-```
 
 ### Input CSV is not timestamp sorted
 
@@ -394,29 +307,11 @@ python -m pip install -r requirements.txt
 Then use the same entry points:
 
 ```bash
-python run_fixed_calibration.py \
-  --csv /path/to/trace.csv \
-  --output-dir results/fixed \
-  --speedup 0 \
-  --retry-delay 0.01 \
-  --good-flow-timeout 60 \
-  --socket-timeout 10 \
-  --max-attempts 64
+python run_fixed_calibration.py --csv /path/to/trace.csv --output-dir results/fixed --speedup 0 --retry-delay 0.01 --good-flow-timeout 60 --socket-timeout 10 --max-attempts 64
 ```
 
 or
 
 ```bash
-python run_sliding_window.py \
-  --csv /path/to/trace.csv \
-  --output-dir results/sliding \
-  --speedup 0 \
-  --retry-delay 0.01 \
-  --good-flow-timeout 60 \
-  --socket-timeout 10 \
-  --max-attempts 64
+python run_sliding_window.py --csv /path/to/trace.csv --output-dir results/sliding --speedup 0 --retry-delay 0.01 --good-flow-timeout 60 --socket-timeout 10 --max-attempts 64
 ```
-
-## Scope
-
-This implementation evaluates the pricing behavior of LINEAR and LINEAR-POWER using replayed flow-level traffic. The service fee is represented as an abstract resource cost; the experiment does not instantiate a concrete computational, memory, or bandwidth puzzle. The localhost setup also does not model real wide-area packet loss, jitter, congestion, or physical network latency.
