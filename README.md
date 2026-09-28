@@ -1,1 +1,1 @@
-# A Resource-Competitive DDoS Defense: Bridging Theory and Experiment
+# Validating Resource-Competitive DDoS Defense Through Experiment
