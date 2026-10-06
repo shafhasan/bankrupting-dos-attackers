@@ -55,20 +55,35 @@ The image only needs to be rebuilt when the Python code, Dockerfile, or Python d
 
 ## Dataset placement
 
-Place the CIC-DDoS2019 CSV file inside the local `data` directory.
+Place any CIC-DDoS2019 CSV file that you want to evaluate inside the local `data` directory.
 
-Example:
+For example:
 
 ```text
 data/
-└── DrDoS_MSSQL.csv
+├── DrDoS_MSSQL.csv
+├── DrDoS_SSDP.csv
+├── DrDoS_UDP.csv
+└── another_trace.csv
 ```
+
+The experiment is not tied to a specific attack trace. Any compatible CSV file may be supplied as long as it contains the configured timestamp and label columns.
 
 The dataset directory is mounted read-only inside the container, so the experiment cannot modify the original CSV.
 
 ## Running the experiment on Windows
 
 The easiest way to run the experiment is with `run_trace.ps1`.
+
+Specify the filename placed in `data/` and choose any name for the output folder.
+
+General form:
+
+```powershell
+.\run_trace.ps1 `
+  -Dataset "<dataset-file>.csv" `
+  -RunName "<run-name>"
+```
 
 Example:
 
@@ -78,7 +93,13 @@ Example:
   -RunName "MSSQL"
 ```
 
-The results are written to:
+The corresponding results are written to:
+
+```text
+results\<run-name>\
+```
+
+For the example above, the output directory is:
 
 ```text
 results\MSSQL\
@@ -100,6 +121,19 @@ Chunk size: 250000 rows
 
 The same experiment can be run without the PowerShell wrapper.
 
+General form:
+
+```powershell
+docker run --rm --init `
+  --mount "type=bind,source=$((Resolve-Path .\data).Path),target=/data,readonly" `
+  --mount "type=bind,source=$((Resolve-Path .\results).Path),target=/results" `
+  ddos-trace-experiment:latest `
+  /data/<dataset-file>.csv `
+  --output-dir /results/<run-name>
+```
+
+Example:
+
 ```powershell
 docker run --rm --init `
   --mount "type=bind,source=$((Resolve-Path .\data).Path),target=/data,readonly" `
@@ -111,11 +145,18 @@ docker run --rm --init `
 
 ## Running with Docker Compose
 
-Set the dataset name and run name:
+Set the dataset filename and choose a run name for the output directory:
 
 ```powershell
-$env:DATASET="DrDoS_MSSQL.csv"
-$env:RUN_NAME="MSSQL"
+$env:DATASET="<dataset-file>.csv"
+$env:RUN_NAME="<run-name>"
+```
+
+Example:
+
+```powershell
+$env:DATASET="DrDoS_SSDP.csv"
+$env:RUN_NAME="SSDP"
 ```
 
 Then run:
@@ -430,7 +471,7 @@ Containerization keeps the Python dependency environment consistent across machi
 
 ## Example runs
 
-### MSSQL
+The same command can be used for any compatible trace by changing only the dataset filename and run name.
 
 ```powershell
 .\run_trace.ps1 `
@@ -438,18 +479,22 @@ Containerization keeps the Python dependency environment consistent across machi
   -RunName "MSSQL"
 ```
 
-### SSDP
-
 ```powershell
 .\run_trace.ps1 `
   -Dataset "DrDoS_SSDP.csv" `
   -RunName "SSDP"
 ```
 
-### UDP
-
 ```powershell
 .\run_trace.ps1 `
   -Dataset "DrDoS_UDP.csv" `
   -RunName "UDP"
+```
+
+For another dataset:
+
+```powershell
+.\run_trace.ps1 `
+  -Dataset "another_trace.csv" `
+  -RunName "another_trace"
 ```
