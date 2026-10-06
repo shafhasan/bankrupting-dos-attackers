@@ -2,9 +2,7 @@
 
 This directory contains the trace-driven experiment used to evaluate the **LINEAR** pricing algorithm on CIC-DDoS2019 flow traces.
 
-The experiment uses the first 50 benign flows as a one-time calibration sample for a Weibull estimator. To avoid temporal leakage, the entire chronological prefix through the 50th benign flow is removed from the workload before LINEAR replay begins. The fitted estimate is then kept fixed for the entire remaining trace.
-
-The experiment compares the empirical adversary-to-algorithm cost ratio with the unscaled constant-gamma Theorem 1 proxy and reports Pearson correlation over all replay flows.
+The experiment uses the first 50 benign flows as a one-time calibration sample for a Weibull estimator. To avoid temporal leakage, the entire chronological prefix through the 50th benign flow is removed from the workload before LINEAR replay begins. The fitted estimate is then kept fixed for the remaining trace.
 
 > This is an offline trace-replay experiment. It does not send network traffic or launch a live attack.
 
@@ -16,16 +14,14 @@ experiment/
 ├── .dockerignore
 ├── docker-compose.yml
 ├── requirements.txt
-├── run_trace.ps1
-├── trace_weibull_experiment.py
+├── experiment-2.py
 ├── data/
 └── results/
 ```
 
 ### Main files
 
-- `trace_weibull_experiment.py` — implements CSV loading, calibration, Weibull fitting, LINEAR replay, cost calculation, theoretical comparison, Pearson correlation, plotting, and result export.
-- `run_trace.ps1` — Windows PowerShell wrapper for running the Docker container without typing the full `docker run` command.
+- `experiment-2.py` — implements CSV loading, calibration, Weibull fitting, LINEAR replay, cost calculation, theoretical comparison, Pearson correlation, plotting, and result export.
 - `Dockerfile` — builds the Python environment used by the experiment.
 - `docker-compose.yml` — provides an alternative Docker Compose workflow.
 - `requirements.txt` — lists the required Python packages.
@@ -71,55 +67,7 @@ The experiment is not tied to a specific attack trace. Any compatible CSV file m
 
 The dataset directory is mounted read-only inside the container, so the experiment cannot modify the original CSV.
 
-## Running the experiment on Windows
-
-The easiest way to run the experiment is with `run_trace.ps1`.
-
-Specify the filename placed in `data/` and choose any name for the output folder.
-
-General form:
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "<dataset-file>.csv" `
-  -RunName "<run-name>"
-```
-
-Example:
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "DrDoS_MSSQL.csv" `
-  -RunName "MSSQL"
-```
-
-The corresponding results are written to:
-
-```text
-results\<run-name>\
-```
-
-For the example above, the output directory is:
-
-```text
-results\MSSQL\
-```
-
-The default experiment settings are:
-
-```text
-Estimator calibration: first 50 benign flows
-Calibration handling: exclude the full prefix through the 50th benign flow
-Plot/checkpoint interval: every 500 replay flows
-Pearson correlation: every replay flow
-CSV read mode: auto
-Chunk threshold: 3078 MiB
-Chunk size: 250000 rows
-```
-
 ## Running directly with Docker
-
-The same experiment can be run without the PowerShell wrapper.
 
 General form:
 
@@ -289,15 +237,13 @@ B / A
 
 ### 7. Calculate the theoretical comparison
 
-The experiment uses the unscaled constant-gamma Theorem 1 shape proxy:
+The experiment uses the constant-gamma Theorem 1 shape proxy:
 
 ```text
 B / (sqrt(B * (g + 1)) + (g + 1))
 ```
 
 where `g` is the cumulative number of benign replay flows.
-
-No final-point scaling, min-max normalization, or other curve scaling is applied.
 
 ### 8. Calculate Pearson correlation
 
@@ -348,7 +294,7 @@ The underlying values are unchanged; only the y-axis display scale differs.
 Both plots show:
 
 - empirical adversary-to-algorithm ratio;
-- raw unscaled theoretical ratio proxy;
+- raw theoretical ratio proxy;
 - Pearson correlation calculated from all replay flows.
 
 ## Output files
@@ -416,36 +362,6 @@ Generated only when `--save-flow-trace` is used.
 
 It contains one row per replay flow with pricing and cumulative cost information and can be large for multi-million-flow traces.
 
-## Large CSV files
-
-The script supports three CSV loading modes.
-
-### Automatic mode
-
-```text
---read-mode auto
-```
-
-This is the default.
-
-Files smaller than the configured threshold are read normally. Files at or above the threshold are read in chunks.
-
-If a full-file read unexpectedly fails because of memory pressure, the script retries with chunked loading.
-
-### Force full-file loading
-
-```text
---read-mode full
-```
-
-### Force chunked loading
-
-```text
---read-mode chunked
-```
-
-The default chunk size is 250,000 rows.
-
 ## Reproducibility
 
 For a fixed CSV file and identical command-line options, the experiment is deterministic.
@@ -468,33 +384,3 @@ Containerization keeps the Python dependency environment consistent across machi
 - Plotting is performed every 500 replay flows by default.
 - The theoretical curve is a shape proxy derived from the constant-gamma form of Theorem 1, not an exact equality for empirical `B/A`.
 - Large traces may still require substantial memory after CSV loading because the replay state is stored in pandas data structures.
-
-## Example runs
-
-The same command can be used for any compatible trace by changing only the dataset filename and run name.
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "DrDoS_MSSQL.csv" `
-  -RunName "MSSQL"
-```
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "DrDoS_SSDP.csv" `
-  -RunName "SSDP"
-```
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "DrDoS_UDP.csv" `
-  -RunName "UDP"
-```
-
-For another dataset:
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "another_trace.csv" `
-  -RunName "another_trace"
-```
