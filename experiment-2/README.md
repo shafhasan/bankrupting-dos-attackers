@@ -1,21 +1,17 @@
-# Trace-Driven CIC-DDoS2019 Experiment for LINEAR
+# Trace-Driven LINEAR Experiment
 
-This repository contains the Dockerized trace-driven experiment used to evaluate the **LINEAR** pricing algorithm on CIC-DDoS2019 flow traces.
+This directory contains the trace-driven experiment used to evaluate the **LINEAR** pricing algorithm on CIC-DDoS2019 flow traces.
 
-The experiment uses an initial benign-flow calibration period to fit a Weibull model, removes that calibration prefix from the workload to avoid temporal leakage, and then replays the remaining trace through LINEAR. It records cumulative algorithm and adversary costs, compares the empirical adversary-to-algorithm cost ratio with the unscaled Theorem 1 proxy, and calculates Pearson correlation over every replay flow.
+The experiment uses the first 50 benign flows as a one-time calibration sample for a Weibull estimator. To avoid temporal leakage, the entire chronological prefix through the 50th benign flow is removed from the workload before LINEAR replay begins. The fitted estimate is then kept fixed for the entire remaining trace.
 
-> This is an offline trace-replay experiment. It does not transmit packets or launch traffic against a live system.
+The experiment compares the empirical adversary-to-algorithm cost ratio with the unscaled constant-gamma Theorem 1 proxy and reports Pearson correlation over all replay flows.
 
-## Main script
-
-```text
-trace_weibull_experiment.py
-```
+> This is an offline trace-replay experiment. It does not send network traffic or launch a live attack.
 
 ## Repository structure
 
 ```text
-trace-driven-docker/
+experiment/
 ├── Dockerfile
 ├── .dockerignore
 ├── docker-compose.yml
@@ -23,70 +19,58 @@ trace-driven-docker/
 ├── run_trace.ps1
 ├── trace_weibull_experiment.py
 ├── data/
-│   └── <CIC-DDoS2019 CSV files>
 └── results/
-    └── <experiment outputs>
 ```
 
-The input CSV files are not copied into the Docker image. They are mounted read-only from `data/`, while generated outputs are written to `results/`.
+### Main files
 
-## Features
+- `trace_weibull_experiment.py` — implements CSV loading, calibration, Weibull fitting, LINEAR replay, cost calculation, theoretical comparison, Pearson correlation, plotting, and result export.
+- `run_trace.ps1` — Windows PowerShell wrapper for running the Docker container without typing the full `docker run` command.
+- `Dockerfile` — builds the Python environment used by the experiment.
+- `docker-compose.yml` — provides an alternative Docker Compose workflow.
+- `requirements.txt` — lists the required Python packages.
+- `data/` — place CIC-DDoS2019 CSV files here.
+- `results/` — experiment outputs are written here.
 
-- Reads CIC-DDoS2019 flow CSV files using the `Timestamp` and `Label` columns.
-- Resolves column names even when the CSV header contains surrounding whitespace.
-- Sorts the trace chronologically using a stable timestamp/original-row ordering when needed.
-- Uses the first **50 benign flows** by default to fit the initial Weibull estimator.
-- Excludes the entire chronological prefix through the 50th benign flow from LINEAR replay.
-- Fits a two-parameter Weibull distribution to positive benign inter-arrival times with location fixed at zero.
-- Uses the fitted Weibull mean as the fixed LINEAR iteration length.
-- Replays all remaining benign and malicious flows chronologically.
-- Assigns prices without using the current flow label.
-- Assumes every replayed flow pays the current LINEAR price and is serviced.
-- Calculates cumulative algorithm cost `A`, adversary cost `B`, and empirical ratio `B/A`.
-- Evaluates the raw, unscaled constant-gamma Theorem 1 proxy.
-- Calculates Pearson correlation from the empirical and theoretical ratios at **every replay flow**.
-- Saves plot/checkpoint values every **500 replay flows** by default.
-- Produces both linear-y-axis and logarithmic-y-axis plots using the same raw ratio values.
-- Supports full-file and chunked CSV parsing for large traces.
-- Can optionally save the complete per-flow pricing trace.
+## Requirements
 
-## Docker requirements
+Only Docker is required on the host machine.
 
 For Windows, install:
 
 - Docker Desktop
-- Linux container support in Docker Desktop
+- PowerShell
 
-A local Python installation is not required when using Docker.
-
-The image uses Python 3.12 and installs the following pinned dependencies:
-
-```text
-numpy==2.3.5
-pandas==2.2.3
-scipy==1.17.0
-matplotlib==3.10.8
-```
+The Python dependencies are installed inside the container.
 
 ## Build the Docker image
 
-Open PowerShell in the repository directory and run:
+From the experiment directory, run:
 
 ```powershell
 docker build -t ddos-trace-experiment:latest .
 ```
 
-Rebuild the image whenever `trace_weibull_experiment.py`, `requirements.txt`, or the `Dockerfile` changes.
+The image only needs to be rebuilt when the Python code, Dockerfile, or Python dependencies change.
 
-## Quick start on Windows
+## Dataset placement
 
-Place the dataset in the `data` directory. For example:
+Place the CIC-DDoS2019 CSV file inside the local `data` directory.
+
+Example:
 
 ```text
-data/DrDoS_MSSQL.csv
+data/
+└── DrDoS_MSSQL.csv
 ```
 
-Then run:
+The dataset directory is mounted read-only inside the container, so the experiment cannot modify the original CSV.
+
+## Running the experiment on Windows
+
+The easiest way to run the experiment is with `run_trace.ps1`.
+
+Example:
 
 ```powershell
 .\run_trace.ps1 `
@@ -94,70 +78,27 @@ Then run:
   -RunName "MSSQL"
 ```
 
-The results will be written to:
+The results are written to:
 
 ```text
-results/MSSQL/
+results\MSSQL\
 ```
 
-The PowerShell helper uses the current experiment defaults:
+The default experiment settings are:
 
 ```text
-checkpoint size        = 500 replay flows
-estimator good flows   = 50 benign flows
-read mode              = auto
-chunk threshold        = 3078 MiB
-chunk size             = 250000 rows
+Estimator calibration: first 50 benign flows
+Calibration handling: exclude the full prefix through the 50th benign flow
+Plot/checkpoint interval: every 500 replay flows
+Pearson correlation: every replay flow
+CSV read mode: auto
+Chunk threshold: 3078 MiB
+Chunk size: 250000 rows
 ```
-
-## Running with the PowerShell helper
-
-The general form is:
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "<dataset.csv>" `
-  -RunName "<run-name>"
-```
-
-Example with all main options specified explicitly:
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "DrDoS_MSSQL.csv" `
-  -RunName "MSSQL" `
-  -CheckpointSize 500 `
-  -EstimatorGoodFlows 50 `
-  -ReadMode auto `
-  -ChunkThresholdMB 3078 `
-  -ChunkSize 250000
-```
-
-To save the complete per-flow pricing trace:
-
-```powershell
-.\run_trace.ps1 `
-  -Dataset "DrDoS_MSSQL.csv" `
-  -RunName "MSSQL" `
-  -SaveFlowTrace
-```
-
-### PowerShell helper parameters
-
-| Parameter | Description | Default |
-|---|---|---:|
-| `-Dataset` | CSV filename inside the `data/` directory | required |
-| `-RunName` | Subdirectory created under `results/` | required |
-| `-CheckpointSize` | Number of replay flows between plotted/saved checkpoints | `500` |
-| `-EstimatorGoodFlows` | Number of earliest benign flows used for estimator calibration | `50` |
-| `-ReadMode` | CSV loading mode: `auto`, `full`, or `chunked` | `auto` |
-| `-ChunkThresholdMB` | File-size threshold for automatic chunked parsing | `3078` |
-| `-ChunkSize` | Number of rows per CSV parsing chunk | `250000` |
-| `-SaveFlowTrace` | Save one output row per replay flow | off |
 
 ## Running directly with Docker
 
-The PowerShell helper is optional. The same experiment can be started directly with `docker run`:
+The same experiment can be run without the PowerShell wrapper.
 
 ```powershell
 docker run --rm --init `
@@ -165,109 +106,71 @@ docker run --rm --init `
   --mount "type=bind,source=$((Resolve-Path .\results).Path),target=/results" `
   ddos-trace-experiment:latest `
   /data/DrDoS_MSSQL.csv `
-  --output-dir /results/MSSQL `
-  --checkpoint-size 500 `
-  --estimator-good-flows 50 `
-  --read-mode auto `
-  --chunk-threshold-mb 3078 `
-  --chunk-size 250000
+  --output-dir /results/MSSQL
 ```
-
-The input mount is read-only:
-
-```text
-/data
-```
-
-The output mount is writable:
-
-```text
-/results
-```
-
-Containerization changes only the execution environment. It does not change the timestamps, calibration procedure, Weibull fitting, LINEAR iteration boundaries, pricing, costs, Pearson calculation, or plotting checkpoints.
 
 ## Running with Docker Compose
 
-Set the dataset filename and run name in PowerShell:
+Set the dataset name and run name:
 
 ```powershell
 $env:DATASET="DrDoS_MSSQL.csv"
 $env:RUN_NAME="MSSQL"
-docker compose run --rm trace-experiment
 ```
 
-Optional Compose overrides supported by the current `docker-compose.yml` are:
+Then run:
 
 ```powershell
-$env:CHECKPOINT_SIZE="500"
-$env:ESTIMATOR_GOOD_FLOWS="50"
-$env:READ_MODE="auto"
 docker compose run --rm trace-experiment
-```
-
-The Compose service mounts:
-
-```text
-./data    -> /data     (read-only)
-./results -> /results
 ```
 
 ## Command-line options
 
-The Python script can also be run directly outside Docker if the required Python packages are installed.
+Display the script options with:
 
-Display all available options with:
-
-```bash
-python trace_weibull_experiment.py --help
+```powershell
+docker run --rm ddos-trace-experiment:latest --help
 ```
-
-The main options are:
 
 | Option | Description | Default |
 |---|---|---:|
-| positional `csv_file` | Path to one CIC-DDoS2019 CSV file | required |
-| `--output-dir` | Directory for CSV, JSON, and PNG outputs | `linear_weibull_results` |
+| `csv_file` | Path to the CIC-DDoS2019 CSV inside the container | Required |
+| `--output-dir` | Output directory | `linear_weibull_results` |
 | `--benign-label` | Label treated as benign | `BENIGN` |
-| `--timestamp-column` | Timestamp column after whitespace stripping | `Timestamp` |
-| `--label-column` | Label column after whitespace stripping | `Label` |
-| `--checkpoint-size` | Plot/save every N replay flows | `500` |
-| `--estimator-good-flows` | Earliest benign flows used for Weibull calibration | `50` |
-| `--save-flow-trace` | Save one row per replay flow | off |
-| `--read-mode` | `auto`, `full`, or `chunked` | `auto` |
-| `--chunk-threshold-mb` | Automatic chunking threshold in MiB | `3078` |
-| `--chunk-size` | Rows per parsing chunk | `250000` |
+| `--timestamp-column` | Timestamp column name | `Timestamp` |
+| `--label-column` | Label column name | `Label` |
+| `--checkpoint-size` | Plot/save one point every N replay flows | `500` |
+| `--estimator-good-flows` | Number of earliest benign flows used for calibration | `50` |
+| `--save-flow-trace` | Save one output row per replay flow | Off |
+| `--read-mode` | CSV loading mode: `auto`, `full`, or `chunked` | `auto` |
+| `--chunk-threshold-mb` | File-size threshold for automatic chunked loading | `3078` |
+| `--chunk-size` | Rows per chunk in chunked mode | `250000` |
 
 ## Experiment procedure
 
 ### 1. Load and order the trace
 
-Only the timestamp and label columns are required from the input CSV. Invalid timestamps are removed, labels are normalized, and each flow is classified as benign or malicious for later accounting.
+The script reads the timestamp and label columns required by the experiment. Rows with invalid timestamps are removed.
 
-If the input timestamps are already chronological, the existing order is retained. Otherwise, the script performs a stable sort by timestamp and original row number.
+If the trace is already chronological, the original order is retained. Otherwise, flows are stably sorted by timestamp and original row number.
 
-### 2. Initial estimator calibration
+### 2. Build the calibration prefix
 
-The earliest `--estimator-good-flows` benign flows are used for calibration. The default is:
+The first 50 benign flows are selected chronologically.
 
-```text
-50 benign flows
-```
+The calibration prefix contains every flow from the beginning of the trace through the 50th benign flow, including malicious flows that occur in that interval.
 
-The calibration prefix ends at the 50th benign flow. Every flow in that prefix is excluded from the LINEAR replay, including malicious flows that occur before the calibration endpoint.
-
-This prevents replaying traffic that occurred before information used to construct the estimator was available.
-
-### 3. Weibull fitting
-
-Let the positive benign inter-arrival times in the calibration sample be `X`.
-
-The script fits a two-parameter Weibull model by maximum likelihood with the location fixed at zero:
+The entire prefix is excluded from the workload after calibration. This prevents replaying flows that occurred before information used by the estimator became available.
 
 ```text
-X ~ Weibull(k, lambda)
+Original trace
+|---------------- calibration prefix ----------------|------ replay ------|
+                    50th benign flow
 ```
+
+### 3. Fit the Weibull estimator
+
+Positive inter-arrival times between the 50 calibration benign flows are used to fit a two-parameter Weibull distribution with location fixed at zero.
 
 The fitted mean is:
 
@@ -275,15 +178,22 @@ The fitted mean is:
 E[X] = lambda * Gamma(1 + 1/k)
 ```
 
-and the estimated benign arrival rate is:
+where:
+
+```text
+k      = Weibull shape
+lambda = Weibull scale
+```
+
+The estimated benign rate is:
 
 ```text
 rho = 1 / E[X]
 ```
 
-The fitted estimator is fixed after calibration and is not updated during replay.
+This estimate is fixed after calibration and is not updated during replay.
 
-### 4. LINEAR iterations
+### 4. Define LINEAR iterations
 
 The estimator rule is:
 
@@ -291,299 +201,255 @@ The estimator rule is:
 g_hat(I) = rho * length(I)
 ```
 
-An iteration resets when:
+An iteration ends when:
 
 ```text
 g_hat(I) >= 1
 ```
 
-Therefore the fixed iteration length is:
+Therefore the iteration length is:
 
 ```text
-iteration_length = 1/rho = E[X]
+1 / rho = E[X]
 ```
 
-Replay iterations are anchored to the timestamp of the first post-calibration replay flow.
+The remaining trace is partitioned into fixed-duration mathematical iterations of width `E[X]`.
 
-### 5. LINEAR pricing
+### 5. Apply LINEAR pricing
 
-Within each iteration, LINEAR uses:
+Within each iteration:
 
 ```text
 PRICE = s + 1
 ```
 
-where `s` is the number of jobs already serviced in the current iteration.
+where `s` is the number of already-serviced jobs in the current iteration.
 
-Therefore the first job in an iteration pays 1, the second pays 2, and so on.
+The first flow in an iteration therefore pays 1, the second pays 2, and so on.
 
-The label of the current flow is not used to determine its price. The experiment assumes that every flow pays the current price and is serviced.
+Pricing does not inspect the flow label. Every replayed flow is assumed to pay the current price and receive service.
 
-### 6. Cost calculation
+### 6. Calculate cumulative costs
 
-For every replayed flow:
+For every replay flow:
 
 ```text
 B = cumulative fees paid by malicious flows
+A = cumulative fees paid by benign flows + cumulative server service cost
 ```
 
-and
+The normalized service cost is 1 per serviced flow.
+
+The empirical adversary-to-algorithm ratio is:
 
 ```text
-A = cumulative fees paid by benign flows
-    + cumulative server service cost
+B / A
 ```
 
-The normalized server service cost is 1 per serviced flow.
+### 7. Calculate the theoretical comparison
 
-The empirical adversary-to-algorithm cost ratio is:
+The experiment uses the unscaled constant-gamma Theorem 1 shape proxy:
 
 ```text
-Empirical ratio = B / A
+B / (sqrt(B * (g + 1)) + (g + 1))
 ```
 
-### 7. Theoretical comparison
+where `g` is the cumulative number of benign replay flows.
 
-The experiment uses the raw constant-gamma Theorem 1 shape proxy:
+No final-point scaling, min-max normalization, or other curve scaling is applied.
+
+### 8. Calculate Pearson correlation
+
+Pearson correlation is calculated using every replay flow.
+
+For replay flow `i`, the paired values are:
 
 ```text
-Theoretical ratio = B / (sqrt(B * (g + 1)) + (g + 1))
+empirical_i   = cumulative B/A at flow i
+theoretical_i = raw theoretical proxy at flow i
 ```
 
-where `g` is the cumulative number of benign replay flows at that point.
-
-No endpoint scaling, min-max normalization, or RMSE calculation is applied.
-
-### 8. Pearson correlation
-
-Pearson correlation is calculated from the empirical and theoretical ratio values at corresponding replay flows.
-
-Conceptually, the two sequences are:
+Pearson therefore compares:
 
 ```text
-Empirical:   E1, E2, E3, ..., EN
-Theoretical: T1, T2, T3, ..., TN
+(empirical_1, theoretical_1)
+(empirical_2, theoretical_2)
+...
+(empirical_N, theoretical_N)
 ```
 
-and the experiment calculates:
+Flow number and inter-arrival time are not the variables being correlated.
+
+The plots are sampled every 500 replay flows, but Pearson uses all replay flows.
+
+## Plotting
+
+Two plots are produced from the same raw empirical and theoretical values.
+
+### Linear plot
 
 ```text
-r = corr([E1, E2, ..., EN], [T1, T2, ..., TN])
+adversary_over_algorithm_vs_jobs_linear.png
 ```
 
-Pearson uses **every replay flow**, not only the flows selected for plotting.
+Uses a linear y-axis.
 
-Flow number and inter-arrival time are not the two variables being correlated. They are used elsewhere in the experiment, but Pearson is calculated directly from the paired empirical and theoretical ratio values.
-
-### 9. Plot checkpoints
-
-The default checkpoint interval is:
+### Logarithmic plot
 
 ```text
-500 replay flows
+adversary_over_algorithm_vs_jobs_log.png
 ```
 
-Therefore plot/checkpoint values are recorded at:
+Uses a logarithmic y-axis.
 
-```text
-500, 1000, 1500, 2000, ...
-```
+The underlying values are unchanged; only the y-axis display scale differs.
 
-The final replay flow is also included when the total replay size is not an exact multiple of 500.
+Both plots show:
 
-The Pearson value displayed in the plot legend is still calculated using every replay flow.
+- empirical adversary-to-algorithm ratio;
+- raw unscaled theoretical ratio proxy;
+- Pearson correlation calculated from all replay flows.
 
 ## Output files
 
-Each run creates the selected output directory.
-
-For example:
-
-```text
-results/MSSQL/
-```
+Each run creates the selected result directory.
 
 ### `experiment_summary.csv`
 
-One-row summary of the experiment, including calibration diagnostics, Weibull parameters, replay counts, final costs, final ratios, and Pearson correlation.
+One-row experiment summary including:
 
-Important fields include:
-
-- number of calibration flows excluded;
-- number of calibration benign and malicious flows;
 - replay flow counts;
-- fitted Weibull shape and scale;
+- calibration diagnostics;
+- Weibull parameters;
 - fitted mean inter-arrival time;
-- estimated benign arrival rate;
-- occupied LINEAR iterations;
-- maximum LINEAR price;
-- final adversary cost `B`;
-- final algorithm cost `A`;
-- final empirical `B/A`;
+- estimated benign rate;
+- LINEAR iteration information;
+- final adversary cost;
+- final algorithm cost;
+- final empirical ratio;
 - final theoretical proxy;
-- all-flow Pearson correlation;
-- number of replay-flow pairs used for Pearson.
+- Pearson correlation;
+- number of replay flows used for Pearson.
 
 ### `experiment_summary.json`
 
-Contains the same run-level summary information in JSON format.
+JSON version of the experiment summary.
 
 ### `checkpoint_costs.csv`
 
-Contains cumulative measurements at every plotting checkpoint.
-
-Important columns include:
+Contains the plot/checkpoint values recorded every `--checkpoint-size` replay flows.
 
 | Column | Description |
 |---|---|
-| `number_of_jobs` | Cumulative replay flows at the checkpoint |
+| `number_of_jobs` | Cumulative replay flows |
 | `benign_jobs` | Cumulative benign replay flows |
 | `malicious_jobs` | Cumulative malicious replay flows |
-| `honest_client_fees` | Cumulative fees paid by benign flows |
-| `adversary_cost_B` | Cumulative adversary cost `B` |
-| `server_service_cost` | Cumulative normalized service cost |
-| `algorithm_cost_A` | Cumulative algorithm cost `A` |
-| `adversary_over_algorithm_B_over_A` | Raw empirical `B/A` |
-| `current_iteration_id` | Current estimator-defined iteration |
+| `honest_client_fees` | Cumulative benign fees |
+| `adversary_cost_B` | Cumulative adversary cost |
+| `server_service_cost` | Cumulative service cost |
+| `algorithm_cost_A` | Cumulative algorithm cost |
+| `adversary_over_algorithm_B_over_A` | Empirical ratio |
+| `theorem1_proxy` | Raw theoretical proxy |
+| `current_iteration_id` | Current estimator iteration |
 | `current_price` | Current LINEAR price |
-| `theorem1_proxy` | Raw, unscaled theoretical ratio proxy |
 
 ### `iteration_summary.csv`
 
-Contains one row for each occupied LINEAR iteration.
+Contains one row per occupied LINEAR iteration, including:
 
-Important fields include:
-
-| Column | Description |
-|---|---|
-| `iteration_id` | Zero-based iteration identifier |
-| `iteration_start` | Timestamp of the first observed flow in the occupied iteration |
-| `iteration_last_flow` | Timestamp of the last observed flow in the iteration |
-| `total_jobs` | Total replay flows in the iteration |
-| `benign_jobs` | Benign replay flows in the iteration |
-| `malicious_jobs` | Malicious replay flows in the iteration |
-| `maximum_price` | Highest LINEAR price reached in the iteration |
-| `honest_client_fees` | Benign fees paid in the iteration |
-| `adversary_cost_B` | Malicious fees paid in the iteration |
-| `server_service_cost` | Service cost for the iteration |
-| `algorithm_cost_A` | Algorithm cost for the iteration |
-| `B_over_A` | Iteration-level adversary-to-algorithm ratio |
-
-### `adversary_over_algorithm_vs_jobs_linear.png`
-
-Plots the raw empirical `B/A` curve and raw theoretical proxy using a linear y-axis.
-
-The legend also displays the Pearson correlation calculated over all replay flows.
-
-### `adversary_over_algorithm_vs_jobs_log.png`
-
-Plots the same raw empirical and theoretical values using a logarithmic y-axis.
-
-The logarithmic version changes only the display scale; it does not transform the data used for Pearson correlation.
+- iteration ID;
+- first and last observed flow timestamps;
+- total jobs;
+- benign jobs;
+- malicious jobs;
+- maximum price;
+- benign fees;
+- adversary cost;
+- service cost;
+- algorithm cost;
+- iteration-level `B/A`.
 
 ### `flow_pricing_trace.csv`
 
-Generated only when `--save-flow-trace` or `-SaveFlowTrace` is enabled.
+Generated only when `--save-flow-trace` is used.
 
-It contains one row per replay flow with the assigned iteration, LINEAR price, per-flow fee contribution, and cumulative costs. Because this file can be very large, it is disabled by default.
+It contains one row per replay flow with pricing and cumulative cost information and can be large for multi-million-flow traces.
 
-## Large CSV files and memory usage
+## Large CSV files
 
-The script supports three input modes:
+The script supports three CSV loading modes.
 
-```text
-auto
-full
-chunked
-```
-
-In `auto` mode, the script checks the CSV file size. Files at or above the configured threshold are parsed in chunks; smaller files are loaded normally.
-
-The current defaults are:
+### Automatic mode
 
 ```text
-chunk threshold = 3078 MiB
-chunk size      = 250000 rows
+--read-mode auto
 ```
 
-Chunking reduces the peak memory required during CSV parsing. However, after parsing, the current implementation still combines the required timestamp/label information into an in-memory trace for sorting and replay. Very large traces therefore still require sufficient Docker memory.
+This is the default.
 
-For large CIC-DDoS2019 files, make sure Docker Desktop has enough memory available.
+Files smaller than the configured threshold are read normally. Files at or above the threshold are read in chunks.
+
+If a full-file read unexpectedly fails because of memory pressure, the script retries with chunked loading.
+
+### Force full-file loading
+
+```text
+--read-mode full
+```
+
+### Force chunked loading
+
+```text
+--read-mode chunked
+```
+
+The default chunk size is 250,000 rows.
 
 ## Reproducibility
 
-The trace-driven experiment contains no random traffic generation. Given the same:
+For a fixed CSV file and identical command-line options, the experiment is deterministic.
 
-- input CSV;
-- Python experiment code;
-- dependency versions;
-- benign label;
-- estimator calibration size;
-- checkpoint size;
-- parsing settings;
+The estimator is fitted from the same first 50 benign flows, the same chronological calibration prefix is removed, and the same replay timestamps determine the same LINEAR iterations and prices.
 
-it should produce the same chronological replay, Weibull fit, LINEAR pricing, costs, theoretical proxy, Pearson correlation, and plot values.
-
-Docker pins the Python package versions so that the software environment can be reproduced on another machine.
+Containerization keeps the Python dependency environment consistent across machines.
 
 ## Methodological notes
 
-- Calibration uses only the earliest benign flows in chronological order.
-- The entire prefix through the final calibration flow is removed from the workload to prevent temporal leakage.
-- The Weibull estimator is fitted once and remains fixed throughout the replay.
-- Only positive benign inter-arrival times are used for Weibull fitting.
-- LINEAR pricing is label-blind; labels are used only after pricing for cost accounting.
-- Every replay flow is assumed to pay the current LINEAR price and receive service.
-- The server service cost is normalized to 1 per serviced flow.
-- Pearson correlation is calculated using raw empirical and raw theoretical ratios at every replay flow.
-- Plot sampling is independent of Pearson calculation: the plots use every 500th replay flow by default, while Pearson uses every replay flow.
-- The theoretical curve is not endpoint-scaled or normalized.
-- RMSE and normalized RMSE are not calculated in the current experiment.
-- The linear and logarithmic plots use the same raw ratio values.
-- Empty mathematical time intervals can exist between occupied iterations; the iteration IDs preserve those time gaps.
-- `iteration_start` in `iteration_summary.csv` is the timestamp of the first observed replay flow in that occupied iteration, not the mathematical left boundary of the interval.
-- CSV chunking changes only how large files are parsed; it does not change the experiment semantics.
+- The estimator is calibrated only once.
+- Only the first 50 benign flows are used for estimator fitting by default.
+- The entire prefix through the 50th benign flow is removed before replay.
+- The fitted estimate remains fixed for the complete remaining workload.
+- LINEAR pricing is label-blind.
+- Labels are used only to determine whether a paid fee contributes to benign cost or adversary cost.
+- Every replay flow is assumed to pay the current price and receive service.
+- The empirical and theoretical curves are not scaled or normalized.
+- Pearson correlation uses raw values at every replay flow.
+- Plotting is performed every 500 replay flows by default.
+- The theoretical curve is a shape proxy derived from the constant-gamma form of Theorem 1, not an exact equality for empirical `B/A`.
+- Large traces may still require substantial memory after CSV loading because the replay state is stored in pandas data structures.
 
-## Expected console output
+## Example runs
 
-At completion, the script prints a summary similar to:
-
-```text
-Experiment completed
-========================================================================
-Rows used in replay:       ...
-Calibration flows excluded: ...
-Good flows:                ...
-Bad flows:                 ...
-Weibull shape k:           ...
-Weibull scale lambda (s):  ...
-Weibull mean E[X] (s):     ...
-Estimated good rate rho:   ... flows/s
-Occupied iterations:       ...
-Maximum LINEAR price:      ...
-Final adversary cost B:    ...
-Final algorithm cost A:    ...
-Final B/A:                 ...
-Final Theorem 1 proxy:     ...
-Pearson correlation r:     ...
-Pearson comparison flows:  ...
-Outputs:                   /results/<run-name>
-```
-
-## Example datasets
-
-The same container can be used for different CIC-DDoS2019 traces by changing only the input filename and run name. For example:
+### MSSQL
 
 ```powershell
-.\run_trace.ps1 -Dataset "DrDoS_MSSQL.csv" -RunName "MSSQL"
+.\run_trace.ps1 `
+  -Dataset "DrDoS_MSSQL.csv" `
+  -RunName "MSSQL"
 ```
+
+### SSDP
 
 ```powershell
-.\run_trace.ps1 -Dataset "DrDoS_SSDP.csv" -RunName "SSDP"
+.\run_trace.ps1 `
+  -Dataset "DrDoS_SSDP.csv" `
+  -RunName "SSDP"
 ```
+
+### UDP
 
 ```powershell
-.\run_trace.ps1 -Dataset "DrDoS_UDP.csv" -RunName "UDP"
+.\run_trace.ps1 `
+  -Dataset "DrDoS_UDP.csv" `
+  -RunName "UDP"
 ```
-
-Each run writes to its own output directory under `results/`.
