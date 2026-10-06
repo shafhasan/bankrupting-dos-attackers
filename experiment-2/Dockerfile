@@ -9,6 +9,6 @@ WORKDIR /app
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY trace_weibull_experiment.py ./trace_weibull_experiment.py
+COPY dataset_trace_weibull_experiment.py ./dataset_trace_weibull_experiment.py
 
-ENTRYPOINT ["python", "/app/trace_weibull_experiment.py"]
+ENTRYPOINT ["python", "/app/dataset_trace_weibull_experiment.py"]
