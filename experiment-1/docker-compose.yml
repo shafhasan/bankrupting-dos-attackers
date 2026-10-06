@@ -1,0 +1,22 @@
+services:
+  experiment:
+    build:
+      context: .
+    image: poisson-linear-experiment:latest
+    volumes:
+      - ./results:/results
+    command:
+      - --total-flows
+      - "100000"
+      - --good-fraction
+      - "0.20"
+      - --good-rate
+      - "15"
+      - --bad-pattern
+      - constant
+      - --checkpoint-step
+      - "100"
+      - --seed
+      - "42"
+      - --output-dir
+      - /results/100k_constant
