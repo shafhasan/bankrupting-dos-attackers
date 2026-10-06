@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.csv
+*.zip
+*.png
+*.log
+.git/
+.gitignore
+.vscode/
+.idea/
+data/
+results/
